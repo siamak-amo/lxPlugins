@@ -27,20 +27,30 @@
 
 #include "exec.h"
 
+#define MIN_OUTPUT_LENGTH (3) // utf-8 characters
+#define MAX_OUTPUT_LENGTH DEFAULT_BUF_CAP
+
+#define MIN_UPDATE_INTERVAL (1) // 1(s)
+#define MAX_UPDATE_INTERVAL (60 * 60) // 1(H)
+
 #ifndef EXEC_TIMEOUT
 #define EXEC_TIMEOUT (1000 * 10)  // milliseconds (10s)
 #endif
-
-#define MIN_OUTPUT_LENGTH (3) // utf-8 characters
-#define MAX_OUTPUT_LENGTH DEFAULT_BUF_CAP
+#ifndef DEFAULT_UPDATE_INTERVAL
+#define DEFAULT_UPDATE_INTERVAL (1)
+#endif
 #ifndef DEFAULT_OUTPUT_LENGTH
 #define DEFAULT_OUTPUT_LENGTH (42)
 #endif
 
-#define MIN_UPDATE_INTERVAL (1) // 1(s)
-#define MAX_UPDATE_INTERVAL (999)
-#ifndef DEFAULT_UPDATE_INTERVAL
-#define DEFAULT_UPDATE_INTERVAL (1)
+#ifndef DEFAULT_CMD
+#define DEFAULT_CMD "echo \\[cmd runner\\]"
+#endif
+#ifndef EXEC_FAILED
+#define EXEC_FAILED " ??? "
+#endif
+#ifndef EXEC_PLACEHOLDER
+#define EXEC_PLACEHOLDER " <--> "
 #endif
 
 typedef struct Cmdout
@@ -120,7 +130,9 @@ runner_th (void *_ptr)
 
       cmdo->runner_state = RUNT_RUNNING;
       int ret = exec_run (&cmdo->exec_cmd);
-      if (0 == ret)
+      if (0 != ret)
+        lxpanel_draw_label_text (cmdo->panel, cmdo->gtext, EXEC_FAILED, FALSE, 1, TRUE);
+      else
         {
           const char *res = exec_tr (&cmdo->exec_cmd, '\n', ' ');
           gchar *utf8 = g_locale_to_utf8 (res, -1, NULL, NULL, NULL);
@@ -227,6 +239,8 @@ cmdo_constructor (LXPanel *panel, config_setting_t *settings)
   pthread_mutex_init(&cmdo->runner_mutex, NULL);
   pthread_create (&cmdo->runner_thread, NULL, runner_th, cmdo);
 
+  lxpanel_draw_label_text (cmdo->panel, cmdo->gtext,
+                           EXEC_PLACEHOLDER, FALSE, 1, TRUE);
   cmdo->timer = g_idle_add ((GSourceFunc) cmdo_update, cmdo);
   return p;
 }
