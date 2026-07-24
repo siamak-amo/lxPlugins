@@ -77,10 +77,12 @@ typedef struct Cmdout
     RUNT_IDLE = 0, // nothing to do
     RUNT_READY, // there is a command to execute
     RUNT_RUNNING, // working on it
+    RUNT_DONE, // result is ready
   } runner_state;
 
   /* command runner. */
   CMD exec_cmd;
+  int exec_ret;
 } Cmdout;
 
 static gboolean cmdo_update (Cmdout *cmdo);
@@ -120,8 +122,12 @@ cmdo_destructor (gpointer user_data)
 void *
 runner_th (void *_ptr)
 {
+  /*
+   * Do not call any lxxx_draw_yyy() function here,
+   * drawing on the panel using this function (form another thread),
+   * will freeze the panel GUI after some time.
+   */
   Cmdout *cmdo = (Cmdout *) _ptr;
-
   while (1)
     {
       /* going to bed until cmdo_update() wakes us up */
@@ -129,38 +135,56 @@ runner_th (void *_ptr)
         pthread_cond_wait (&cmdo->runner_cond, &cmdo->runner_mutex);
 
       cmdo->runner_state = RUNT_RUNNING;
-      int ret = exec_run (&cmdo->exec_cmd);
-      if (0 != ret)
-        lxpanel_draw_label_text (cmdo->panel, cmdo->gtext, EXEC_FAILED, FALSE, 1, TRUE);
-      else
-        {
-          const char *res = exec_tr (&cmdo->exec_cmd, '\n', ' ');
-          gchar *utf8 = g_locale_to_utf8 (res, -1, NULL, NULL, NULL);
-          if (utf8)
-            {
-              lxpanel_draw_label_text (cmdo->panel, cmdo->gtext, utf8,
-                                       cmdo->bold_text, 1, TRUE);
-              g_free (utf8);
-            }
-        }
-      cmdo->runner_state = RUNT_IDLE;
+      cmdo->exec_ret = exec_run (&cmdo->exec_cmd); // blocking.
+      cmdo->runner_state = RUNT_DONE;
     }
+
   pthread_exit (NULL);
 }
 
 static gboolean
 cmdo_update (Cmdout *cmdo)
 {
+  const char *res;
+  gchar *res_utf8;
+
   if (g_source_is_destroyed (g_main_current_source ()))
     return FALSE;
   cmdo->timer = g_timeout_add (cmdo->refresh_interval * 1000,
                                (GSourceFunc) cmdo_update, (gpointer) cmdo);
 
-  if (RUNT_IDLE == cmdo->runner_state)
+  switch (cmdo->runner_state)
     {
+    case RUNT_RUNNING:
+    case RUNT_READY: // unreachable.
+      break;
+
+    case RUNT_DONE:
+      if (0 != cmdo->exec_ret)
+        lxpanel_draw_label_text (cmdo->panel, cmdo->gtext, EXEC_FAILED,
+                                 cmdo->bold_text, 1, TRUE);
+      else /* exec() success */
+        {
+          res = exec_tr (&cmdo->exec_cmd, '\n', ' ');
+          if ((res_utf8 = g_locale_to_utf8 (res, -1, NULL, NULL, NULL)))
+            {
+              lxpanel_draw_label_text (cmdo->panel, cmdo->gtext, res_utf8,
+                                       cmdo->bold_text, 1, TRUE);
+              g_free (res_utf8);
+            }
+        }
       cmdo->runner_state = RUNT_READY;
       pthread_cond_signal (&cmdo->runner_cond);
+      break;
+
+    case RUNT_IDLE:
+      lxpanel_draw_label_text (cmdo->panel, cmdo->gtext, EXEC_PLACEHOLDER,
+                               cmdo->bold_text, 1, TRUE);
+      cmdo->runner_state = RUNT_READY;
+      pthread_cond_signal (&cmdo->runner_cond);
+      break;
     }
+
   return FALSE;
 }
 
@@ -239,8 +263,6 @@ cmdo_constructor (LXPanel *panel, config_setting_t *settings)
   pthread_mutex_init(&cmdo->runner_mutex, NULL);
   pthread_create (&cmdo->runner_thread, NULL, runner_th, cmdo);
 
-  lxpanel_draw_label_text (cmdo->panel, cmdo->gtext,
-                           EXEC_PLACEHOLDER, FALSE, 1, TRUE);
   cmdo->timer = g_idle_add ((GSourceFunc) cmdo_update, cmdo);
   return p;
 }
