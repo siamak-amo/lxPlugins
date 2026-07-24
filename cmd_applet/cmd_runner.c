@@ -74,10 +74,10 @@ typedef struct Cmdout
   pthread_mutex_t runner_mutex;
   pthread_cond_t runner_cond;
   enum {
-    RUNT_IDLE = 0, // nothing to do
-    RUNT_READY, // there is a command to execute
-    RUNT_RUNNING, // working on it
-    RUNT_DONE, // result is ready
+    RUNT_IDLE = 0,    // nothing to do
+    RUNT_READY,       // there is a command to execute
+    RUNT_RUNNING,     // middle of running the command
+    RUNT_DONE,        // result is ready
   } runner_state;
 
   /* command runner. */
@@ -204,28 +204,23 @@ ensure_cfg (Cmdout *cmdo)
   if (MIN_UPDATE_INTERVAL >= cmdo->refresh_interval)
     cmdo->refresh_interval = DEFAULT_UPDATE_INTERVAL;
 
+  /* our execvp() call will have either 2 or 4 args. */
+  if (! cmdo->exec_cmd.args)
+    cmdo->exec_cmd.args = g_new0 (const char *, 4);
   if (cmdo->run_with_shell)
-    {
+    { /* 4 args. */
       cmdo->exec_cmd.execvp_bin = cmdo->shell;
       cmdo->exec_cmd.args[0] = cmdo->shell;
       cmdo->exec_cmd.args[1] = "-c";
       cmdo->exec_cmd.args[2] = cmdo->cmd;
       cmdo->exec_cmd.args[3] = NULL;
     }
-  else
+  else /* 2 args. */
     {
       cmdo->exec_cmd.execvp_bin = cmdo->cmd;
       cmdo->exec_cmd.args[0] = cmdo->cmd;
       cmdo->exec_cmd.args[1] = NULL;
     }
-}
-
-static void
-init_cmd_exec (Cmdout *cmdo)
-{
-  cmdo->exec_cmd.args = g_new0 (const char *, 4);
-  ensure_cfg (cmdo);
-  exec_init (&cmdo->exec_cmd);
 }
 
 /* Plugin constructor */
@@ -241,7 +236,8 @@ cmdo_constructor (LXPanel *panel, config_setting_t *settings)
   lxpanel_plugin_set_data (p, cmdo, cmdo_destructor);
 
   load_from_cfg (cmdo);
-  init_cmd_exec (cmdo);
+  ensure_cfg (cmdo);
+  exec_init (&cmdo->exec_cmd);
 
   /* Put the label inside an event box so it can handle clicks
      (do we really need this?) */
@@ -296,13 +292,10 @@ cmdo_apply_configuration (gpointer user_data)
   config_group_set_int (   cmdo->settings, "UpdateInterval", cmdo->refresh_interval);  
 
   /* spawn the updater again. */
-  if (cmdo->runner_state == RUNT_RUNNING)
-    {
-      pthread_cancel (cmdo->runner_thread);
-      pthread_join (cmdo->runner_thread, NULL);
-      cmdo->runner_state = RUNT_IDLE;
-      pthread_create (&cmdo->runner_thread, NULL, runner_th, cmdo);
-    }
+  pthread_cancel (cmdo->runner_thread);
+  pthread_join (cmdo->runner_thread, NULL);
+  cmdo->runner_state = RUNT_IDLE;
+  pthread_create (&cmdo->runner_thread, NULL, runner_th, cmdo);
   cmdo->timer = g_idle_add ((GSourceFunc) cmdo_update, cmdo);
   return FALSE;
 }
@@ -346,8 +339,6 @@ cmdo_configure (LXPanel *panel, GtkWidget *p)
             _("set it zero to get the maximum allowed length"), NULL, CONF_TYPE_TRIM,
         _("Update interval (s)"), &cmdo->refresh_interval, CONF_TYPE_INT,
         NULL);
-
-  ensure_cfg (cmdo);
   return res;
 }
 
