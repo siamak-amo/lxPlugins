@@ -50,9 +50,6 @@
 #ifndef EXEC_FAILED
 #define EXEC_FAILED " ??? "
 #endif
-#ifndef EXEC_PLACEHOLDER
-#define EXEC_PLACEHOLDER " <--> "
-#endif
 
 typedef struct /* Main applet descriptor */
 {
@@ -66,6 +63,7 @@ typedef struct /* Main applet descriptor */
 
   /* internal */
   guint timer;
+  int progress; // waiting for command output
   LXPanel *panel;
   GtkWidget *gtext; // output of command
   GtkWidget *plugin; // top level widget
@@ -84,6 +82,7 @@ typedef struct /* Main applet descriptor */
   /* command runner. */
   CMD exec_cmd;
   int exec_ret;
+  char *exec_res;
 } Cmdapp;
 
 static gboolean cmdp_update (Cmdapp *cmdp);
@@ -137,16 +136,31 @@ runner_th (void *_ptr)
 
       cmdp->runner_state = RUNT_RUNNING;
       cmdp->exec_ret = exec_run (&cmdp->exec_cmd); // blocking.
+      cmdp->exec_res = exec_tr (&cmdp->exec_cmd, '\n', ' ');
       cmdp->runner_state = RUNT_DONE;
     }
 
   pthread_exit (NULL);
 }
 
+/* draw a little progress-bar like: [**  ], ... to, [  **] */
+static void
+draw_progress (Cmdapp *cmdp)
+{
+  const int positions[4] = {0, 1, 2, 1};
+  {
+    char tmp[] = " [    ] ";
+    int star = positions[cmdp->progress];
+    tmp[star + 2] = '*';
+    tmp[star + 3] = '*';
+    lxpanel_draw_label_text (cmdp->panel, cmdp->gtext, tmp, cmdp->bold_text, 1, TRUE);
+  }
+  cmdp->progress = (cmdp->progress + 1) % 4;
+}
+
 static gboolean
 cmdp_update (Cmdapp *cmdp)
 {
-  const char *res;
   gchar *res_utf8;
 
   if (g_source_is_destroyed (g_main_current_source ()))
@@ -157,6 +171,9 @@ cmdp_update (Cmdapp *cmdp)
   switch (cmdp->runner_state)
     {
     case RUNT_RUNNING:
+      if (! cmdp->exec_res)
+        draw_progress (cmdp);
+      break;
     case RUNT_READY: // unreachable.
       break;
 
@@ -166,8 +183,7 @@ cmdp_update (Cmdapp *cmdp)
                                  cmdp->bold_text, 1, TRUE);
       else /* exec() success */
         {
-          res = exec_tr (&cmdp->exec_cmd, '\n', ' ');
-          if ((res_utf8 = g_locale_to_utf8 (res, -1, NULL, NULL, NULL)))
+          if ((res_utf8 = g_locale_to_utf8 (cmdp->exec_res, -1, NULL, NULL, NULL)))
             {
               lxpanel_draw_label_text (cmdp->panel, cmdp->gtext, res_utf8,
                                        cmdp->bold_text, 1, TRUE);
@@ -179,8 +195,7 @@ cmdp_update (Cmdapp *cmdp)
       break;
 
     case RUNT_IDLE:
-      lxpanel_draw_label_text (cmdp->panel, cmdp->gtext, EXEC_PLACEHOLDER,
-                               cmdp->bold_text, 1, TRUE);
+      draw_progress (cmdp);
       cmdp->runner_state = RUNT_READY;
       pthread_cond_signal (&cmdp->runner_cond);
       break;
@@ -282,6 +297,7 @@ cmdp_apply_configuration (gpointer user_data)
 
   if (cmdp->exec_cmd.buf)
     cmdp->exec_cmd.buf[0] = '\0';
+  cmdp->exec_res = NULL;
 
   /* Save configuration */
   config_group_set_string (cmdp->settings, "Command", cmdp->cmd);
