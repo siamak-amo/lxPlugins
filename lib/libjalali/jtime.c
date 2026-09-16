@@ -638,13 +638,13 @@ char* jstrptime(const char* s, const char* format, struct jtm* jtm)
 
     char* pos_n;
     char* pos_c;
-    char* pos_e;
+    const char* pos_e;
 
     char** ptr;
 
     size_t diff = 0, diff1 = 0;
     int s_s, fmt_s, tmp;
-    int i, j, k, f, c = 0;
+    int i, j, k, f;
     char fd;
 
     struct jtm _j;
@@ -826,7 +826,6 @@ char* jstrptime(const char* s, const char* format, struct jtm* jtm)
         }
 
 
-        c++;
         j += diff + 2;
         i += diff1 + diff;
     }
