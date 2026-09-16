@@ -52,72 +52,19 @@ const int accumulated_jalali_month_len[] = { 0, 31, 62, 93, 124, 155, 186,
 extern char* tzname[2];
 
 /*
- * Jalali leap year indication function. The algorithm used here
- * is loosely based on the famous recurring 2820 years length period. This
- * period is then divided into 88 cycles, each following a 29, 33, 33, 33
- * years length pattern with the exception for the last being 37 years long.
- * In every of these 29, 33 or 37 years long periods starting with year 0,
- * leap years are multiples of four except for year 0 in each period.
- * The current 2820 year period started in the year AP 475 (AD 1096).
+ * Jalali leap year indication function.
+ * using 33-years algorithm.
  */
 
 int jalali_is_jleap(int year)
 {
-    int pr = year;
+  year -= 1210;
+  year %= 33;
 
-    /* Shifting ``year'' with 2820 year period epoch. */
-    pr -= JALALI_LEAP_BASE;
+  if (year == 0)
+    return 1;
 
-    pr %= JALALI_LEAP_PERIOD;
-
-    /*
-     * According to C99 standards, modulo operator's result has the same sign
-     * as dividend. Since what we require to process has to be in range
-     * 0-2819, we have to shift the remainder to be positive if dividend is
-     * negative.
-     */
-    if (pr < 0) {
-        pr += JALALI_LEAP_PERIOD;
-    }
-
-    /*
-     * Every cycle consists of one 29 year period and three identical 33 year
-     * periods forming a 128 years length cycle. An exception applies to the
-     * last cycle being 132 years instead and it's last 33 years long partition
-     * will be extended for an extra 4 years thus becoming 37 years long.
-     * JALALI_LAST_CYCLE_START literally marks the beginning of this last
-     * cycle.
-     */
-
-    pr = (pr > JALALI_LAST_CYCLE_START) ?
-        (pr - JALALI_LAST_CYCLE_START) : pr % JALALI_NORMAL_CYCLE_LENGTH;
-
-    /*
-     * Classifying year in a cycle. Assigning to one of the four partitions.
-     */
-    int i;
-    for (i=0; i<J_LI; i++)
-    {
-        if ((pr >= cycle_patterns[i]) && (pr < cycle_patterns[i+1]))
-        {
-            pr -= cycle_patterns[i];
-            /* Handling year-0 exception */
-            if (!pr) /* pr is zero */
-                return 0;
-            /*
-             * If year is a multiple of four then it's leap,
-             * ordinary otherwise.
-             */
-            else
-                return !(pr % J_LI);
-        }
-    }
-
-    /*
-     * Our code flow better not reach this fail-safe
-     * return statement and I really mean it.
-     */
-    return 0;
+  return (year % 4 == 0);
 }
 
 /*
