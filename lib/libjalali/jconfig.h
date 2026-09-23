@@ -69,7 +69,7 @@
 #define J_UTC_EPOCH_YEAR 1348
 #define J_UTC_EPOCH_MONTH 10
 #define J_UTC_EPOCH_DAY 11
-#define J_UTC_EPOCH_DIFF 286
+#define J_UTC_EPOCH_DIFF 287
 #define J_UTC_EPOCH_WDAY 5
 
 #endif /* JCONFIG_H */
